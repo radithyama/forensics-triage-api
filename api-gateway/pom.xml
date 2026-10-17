@@ -15,11 +15,24 @@
     <artifactId>api-gateway</artifactId>
     <version>0.1.0</version>
     <name>forensics-api-gateway</name>
-    <description>Reactive upload + job API for the Memory Forensics Triage platform</description>
+    <description>Serverless job API for the Memory Forensics Triage platform (GCS + Pub/Sub)</description>
 
     <properties>
         <java.version>21</java.version>
+        <google-cloud-bom.version>26.90.0</google-cloud-bom.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>com.google.cloud</groupId>
+                <artifactId>libraries-bom</artifactId>
+                <version>${google-cloud-bom.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <dependency>
@@ -27,8 +40,12 @@
             <artifactId>spring-boot-starter-webflux</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-redis-reactive</artifactId>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-storage</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-pubsub</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

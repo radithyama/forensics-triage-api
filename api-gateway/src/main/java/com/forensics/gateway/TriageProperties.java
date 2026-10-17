@@ -1,17 +1,18 @@
 package com.forensics.gateway;
 
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.util.unit.DataSize;
 
 @ConfigurationProperties("triage")
 public record TriageProperties(
-        Path uploadDir,
-        String queueKey,
-        Duration jobTtl,
-        String workerToken,
+        String projectId,
+        String bucket,
+        String topic,
+        Duration uploadUrlTtl,
+        DataSize maxUploadSize,
         List<String> allowedOrigins,
         List<String> allowedPlugins) {
 

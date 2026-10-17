@@ -9,7 +9,8 @@ interface Props {
 }
 
 const LABEL: Record<Props["phase"], string> = {
-  uploading: "Uploading evidence",
+  uploading: "Uploading evidence to Cloud Storage",
+  AWAITING_UPLOAD: "Waiting for upload",
   QUEUED: "Queued",
   RUNNING: "Analysing",
   COMPLETED: "Complete",

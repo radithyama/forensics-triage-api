@@ -1,4 +1,4 @@
-export type JobStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED";
+export type JobStatus = "AWAITING_UPLOAD" | "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED";
 
 export interface ProcessNode {
   pid: number;
@@ -42,7 +42,10 @@ export interface Job {
   id: string;
   filename: string;
   sizeBytes: number;
-  sha256: string;
+  /** Server-side MD5 recorded by GCS at upload (base64). */
+  md5?: string;
+  /** SHA-256 computed by the worker after download. */
+  sha256?: string;
   plugin: string;
   status: JobStatus;
   progress: number;
@@ -50,6 +53,13 @@ export interface Job {
   createdAt: string;
   updatedAt: string;
   result?: TriageResult;
+}
+
+export interface CreateJobResponse {
+  job: Job;
+  uploadUrl: string;
+  uploadMethod: "PUT";
+  uploadHeaders: Record<string, string>;
 }
 
 export const PLUGINS = [

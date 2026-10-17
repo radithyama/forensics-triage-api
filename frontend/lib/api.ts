@@ -1,4 +1,4 @@
-import type { Job } from "./types";
+import type { CreateJobResponse, Job } from "./types";
 import mockJob from "./mock-job.json";
 
 /** Empty in production (same-origin via nginx); set NEXT_PUBLIC_API_BASE=http://localhost:8080 for `next dev`. */
@@ -13,30 +13,58 @@ function errorMessage(body: string, status: number): string {
   }
 }
 
-/** Uses XHR rather than fetch because fetch cannot report upload progress. */
-export function uploadEvidence(
+async function postJson<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(errorMessage(text, res.status));
+  return JSON.parse(text);
+}
+
+/** PUT straight to the GCS signed URL. XHR (not fetch) because fetch cannot report upload progress. */
+function putToSignedUrl(
+  { uploadUrl, uploadMethod, uploadHeaders }: CreateJobResponse,
+  file: File,
+  onProgress: (fraction: number) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(uploadMethod, uploadUrl);
+    Object.entries(uploadHeaders).forEach(([k, v]) => xhr.setRequestHeader(k, v));
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
+    xhr.onload = () =>
+      xhr.status >= 200 && xhr.status < 300
+        ? resolve()
+        : reject(new Error(`Upload to Cloud Storage failed (HTTP ${xhr.status})`));
+    xhr.onerror = () => reject(new Error("Network error while uploading to Cloud Storage"));
+    xhr.onabort = () => reject(new DOMException("Upload cancelled", "AbortError"));
+    signal?.addEventListener("abort", () => xhr.abort());
+    xhr.send(file);
+  });
+}
+
+/**
+ * Three-step intake: register the job (gateway returns a signed URL), upload the evidence directly to
+ * Cloud Storage, then ask the gateway to queue it. Large images never pass through Cloud Run.
+ */
+export async function uploadEvidence(
   file: File,
   plugin: string,
   onProgress: (fraction: number) => void,
   signal?: AbortSignal,
 ): Promise<Job> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    const form = new FormData();
-    form.append("plugin", plugin);
-    form.append("file", file);
-
-    xhr.open("POST", `${API_BASE}/api/jobs`);
-    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) resolve(JSON.parse(xhr.responseText));
-      else reject(new Error(errorMessage(xhr.responseText, xhr.status)));
-    };
-    xhr.onerror = () => reject(new Error("Network error while uploading"));
-    xhr.onabort = () => reject(new DOMException("Upload cancelled", "AbortError"));
-    signal?.addEventListener("abort", () => xhr.abort());
-    xhr.send(form);
-  });
+  const created = await postJson<CreateJobResponse>(
+    "/api/jobs",
+    { filename: file.name, sizeBytes: file.size, plugin },
+    signal,
+  );
+  await putToSignedUrl(created, file, onProgress, signal);
+  return postJson<Job>(`/api/jobs/${encodeURIComponent(created.job.id)}/start`, undefined, signal);
 }
 
 export async function fetchJob(id: string, signal?: AbortSignal): Promise<Job> {

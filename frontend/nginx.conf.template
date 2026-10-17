@@ -7,7 +7,7 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "DENY" always;
     add_header Referrer-Policy "no-referrer" always;
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://storage.googleapis.com; frame-ancestors 'none'" always;
 
     location = /healthz {
         access_log off;
@@ -15,23 +15,17 @@ server {
     }
 
     # Only the public API is proxied; the gateway's /internal/** worker endpoints are never exposed.
+    # Evidence goes browser -> GCS via signed URL, so only small JSON calls pass through here.
     location /api/ {
-        proxy_pass http://${API_UPSTREAM};
+        proxy_pass ${API_UPSTREAM_URL};
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        # Cloud Run routes by Host, and needs SNI for its TLS certificate.
+        proxy_set_header Host ${API_UPSTREAM_HOST};
+        proxy_ssl_server_name on;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-
-        # Memory images are multi-GB: stream straight through instead of buffering on nginx's disk.
-        client_max_body_size 0;
-        proxy_request_buffering off;
-        proxy_read_timeout 900s;
-        proxy_send_timeout 900s;
-    }
-
-    # Worker-only gateway routes: answer 404 here instead of falling through to the SPA.
-    location /internal/ {
-        return 404;
+        client_max_body_size 64k;
+        proxy_read_timeout 60s;
     }
 
     location /_next/static/ {

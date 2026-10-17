@@ -1,25 +1,23 @@
 package com.forensics.gateway.job;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Stream;
+import java.util.concurrent.TimeUnit;
 
 import com.forensics.gateway.TriageProperties;
+import com.google.cloud.pubsub.v1.Publisher;
+import com.google.cloud.storage.Blob;
+import com.google.cloud.storage.BlobId;
+import com.google.cloud.storage.BlobInfo;
+import com.google.cloud.storage.HttpMethod;
+import com.google.cloud.storage.Storage;
+import com.google.protobuf.ByteString;
+import com.google.pubsub.v1.PubsubMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
@@ -27,145 +25,124 @@ import reactor.core.scheduler.Schedulers;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Owns the job lifecycle: evidence intake to the temp volume, job state in a Redis hash
- * ({@code job:<id>}), and hand-off to the worker via a Redis list used as a queue.
+ * Job lifecycle on serverless primitives:
+ * <ol>
+ *   <li>{@link #create} records the job and returns a short-lived V4 signed URL. The browser uploads the
+ *       evidence straight to GCS, so multi-GB images never pass through Cloud Run (32 MiB request cap).</li>
+ *   <li>{@link #start} pins the uploaded object generation + server-side MD5 and publishes to Pub/Sub,
+ *       whose push subscription wakes the worker.</li>
+ * </ol>
  */
 @Service
 public class JobService {
 
     private static final Logger log = LoggerFactory.getLogger(JobService.class);
-    private static final String EVIDENCE_FILE = "evidence.img";
+    static final String UPLOAD_CONTENT_TYPE = "application/octet-stream";
 
-    private final ReactiveStringRedisTemplate redis;
+    private final Storage storage;
+    private final Publisher publisher;
+    private final JobStore jobs;
     private final TriageProperties props;
     private final JsonMapper json;
 
-    public JobService(ReactiveStringRedisTemplate redis, TriageProperties props, JsonMapper json) {
-        this.redis = redis;
+    public JobService(Storage storage, Publisher publisher, JobStore jobs, TriageProperties props, JsonMapper json) {
+        this.storage = storage;
+        this.publisher = publisher;
+        this.jobs = jobs;
         this.props = props;
         this.json = json;
     }
 
-    public Mono<Job> submit(FilePart file, String requestedPlugin) {
-        String plugin = (requestedPlugin == null || requestedPlugin.isBlank())
-                ? TriageProperties.DEFAULT_PLUGIN : requestedPlugin.trim();
+    public Mono<CreateJobResponse> create(CreateJobRequest req) {
+        String plugin = (req.plugin() == null || req.plugin().isBlank()) ? TriageProperties.DEFAULT_PLUGIN : req.plugin().trim();
         if (!props.allowedPlugins().contains(plugin)) {
             return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported plugin: " + plugin));
         }
+        if (req.sizeBytes() > props.maxUploadSize().toBytes()) {
+            return Mono.error(new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE,
+                    "Evidence exceeds the " + props.maxUploadSize().toGigabytes() + " GB limit"));
+        }
 
         String id = UUID.randomUUID().toString();
-        // The client-supplied name is kept as metadata only; on disk we never use it (no path traversal).
-        String filename = sanitize(file.filename());
-        Path dir = props.uploadDir().resolve(id);
-        Path target = dir.resolve(EVIDENCE_FILE);
+        String now = Instant.now().toString();
+        Job job = new Job(id, sanitize(req.filename()), req.sizeBytes(), null, null, plugin,
+                JobStatus.AWAITING_UPLOAD, 0, "Waiting for evidence upload", now, now, null);
 
-        return Mono.fromCallable(() -> Files.createDirectories(dir))
-                .subscribeOn(Schedulers.boundedElastic())
-                .then(file.transferTo(target))
-                .then(Mono.fromCallable(() -> new Evidence(Files.size(target), sha256(target)))
+        return jobs.create(job)
+                .then(Mono.fromCallable(() -> storage.signUrl(
+                                BlobInfo.newBuilder(evidenceId(id)).setContentType(UPLOAD_CONTENT_TYPE).build(),
+                                props.uploadUrlTtl().toSeconds(), TimeUnit.SECONDS,
+                                Storage.SignUrlOption.httpMethod(HttpMethod.PUT),
+                                Storage.SignUrlOption.withContentType(),
+                                Storage.SignUrlOption.withV4Signature()))
                         .subscribeOn(Schedulers.boundedElastic()))
-                .flatMap(ev -> {
-                    if (ev.size() == 0) {
-                        return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Uploaded file is empty"));
-                    }
-                    String now = Instant.now().toString();
-                    Map<String, String> fields = new HashMap<>();
-                    fields.put("id", id);
-                    fields.put("filename", filename);
-                    fields.put("sizeBytes", Long.toString(ev.size()));
-                    fields.put("sha256", ev.sha256());
-                    fields.put("plugin", plugin);
-                    fields.put("status", JobStatus.QUEUED.name());
-                    fields.put("progress", "0");
-                    fields.put("message", "Queued for analysis");
-                    fields.put("createdAt", now);
-                    fields.put("updatedAt", now);
+                .map(url -> new CreateJobResponse(job, url.toString(), "PUT", Map.of("Content-Type", UPLOAD_CONTENT_TYPE)));
+    }
 
-                    String message = json.writeValueAsString(new JobMessage(id, plugin, filename, ev.sha256()));
-                    return redis.opsForHash().putAll(key(id), fields)
-                            .then(redis.expire(key(id), props.jobTtl()))
-                            .then(redis.opsForList().leftPush(props.queueKey(), message))
-                            .doOnSuccess(depth -> log.info("Queued job {} ({} bytes, sha256={}, plugin={}, queueDepth={})",
-                                    id, ev.size(), ev.sha256(), plugin, depth))
-                            .then(find(id));
-                })
-                .onErrorResume(e -> deleteEvidence(id).then(Mono.error(e)));
+    public Mono<Job> start(String id) {
+        requireUuid(id);
+        return jobs.get(id)
+                .switchIfEmpty(Mono.error(notFound()))
+                .flatMap(stored -> {
+                    if (stored.job().status() != JobStatus.AWAITING_UPLOAD) {
+                        return Mono.error(new ResponseStatusException(HttpStatus.CONFLICT, "Job already started"));
+                    }
+                    return Mono.fromCallable(() -> storage.get(evidenceId(id)))
+                            .subscribeOn(Schedulers.boundedElastic())
+                            .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.CONFLICT, "Evidence has not been uploaded yet")))
+                            .flatMap(blob -> enqueue(stored, blob));
+                });
+    }
+
+    private Mono<Job> enqueue(JobStore.Stored stored, Blob blob) {
+        if (blob.getSize() == 0) {
+            return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Uploaded file is empty"));
+        }
+        if (blob.getSize() > props.maxUploadSize().toBytes()) {
+            // The signed URL can't cap size, so enforce it here and discard the oversized object.
+            return Mono.fromRunnable(() -> storage.delete(blob.getBlobId()))
+                    .subscribeOn(Schedulers.boundedElastic())
+                    .then(Mono.error(new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Evidence exceeds the size limit")));
+        }
+
+        Job previous = stored.job();
+        Job queued = previous.withQueued(blob.getSize(), blob.getMd5(), Instant.now().toString());
+        JobMessage message = new JobMessage(previous.id(), previous.plugin(), blob.getBucket(), blob.getName(),
+                blob.getGeneration(), blob.getMd5());
+
+        return jobs.replace(queued, stored.generation())
+                .then(publish(message))
+                .doOnNext(msgId -> log.info("Queued job {} ({} bytes, md5={}, generation={}, pubsub={})",
+                        queued.id(), blob.getSize(), blob.getMd5(), blob.getGeneration(), msgId))
+                .thenReturn(queued)
+                // If publishing failed, roll back to AWAITING_UPLOAD so the client can retry start.
+                .onErrorResume(e -> !(e instanceof ResponseStatusException),
+                        e -> jobs.get(previous.id())
+                                .flatMap(s -> jobs.replace(previous, s.generation()))
+                                .then(Mono.error(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                                        "Could not queue job, please retry", e))));
+    }
+
+    private Mono<String> publish(JobMessage message) {
+        PubsubMessage msg = PubsubMessage.newBuilder()
+                .setData(ByteString.copyFromUtf8(json.writeValueAsString(message)))
+                .putAttributes("jobId", message.jobId())
+                .build();
+        return Mono.fromCallable(() -> publisher.publish(msg).get(30, TimeUnit.SECONDS))
+                .subscribeOn(Schedulers.boundedElastic());
     }
 
     public Mono<Job> find(String id) {
         requireUuid(id);
-        return redis.<String, String>opsForHash().entries(key(id))
-                .collectMap(Map.Entry::getKey, Map.Entry::getValue)
-                .filter(m -> !m.isEmpty())
-                .map(this::toJob)
-                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Job not found")));
+        return jobs.get(id).map(JobStore.Stored::job).switchIfEmpty(Mono.error(notFound()));
     }
 
-    public Mono<Job> applyUpdate(String id, StatusUpdate update) {
-        return find(id).flatMap(existing -> {
-            if (existing.status().isTerminal()) {
-                return Mono.error(new ResponseStatusException(HttpStatus.CONFLICT, "Job already finished"));
-            }
-            Map<String, String> fields = new HashMap<>();
-            fields.put("status", update.status().name());
-            fields.put("progress", Integer.toString(update.progress()));
-            fields.put("updatedAt", Instant.now().toString());
-            if (update.message() != null) {
-                fields.put("message", update.message());
-            }
-            if (update.result() != null) {
-                fields.put("result", json.writeValueAsString(update.result()));
-            }
-            Mono<Void> cleanup = update.status().isTerminal() ? deleteEvidence(id) : Mono.empty();
-            return redis.opsForHash().putAll(key(id), fields)
-                    .then(cleanup)
-                    .then(find(id));
-        });
+    private BlobId evidenceId(String id) {
+        return BlobId.of(props.bucket(), "evidence/" + id + "/evidence.img");
     }
 
-    /** Path of the stored evidence, for the worker download endpoint. */
-    public Mono<Path> evidencePath(String id) {
-        requireUuid(id);
-        Path path = props.uploadDir().resolve(id).resolve(EVIDENCE_FILE);
-        return Mono.fromCallable(() -> Files.isRegularFile(path))
-                .subscribeOn(Schedulers.boundedElastic())
-                .flatMap(exists -> exists ? Mono.just(path)
-                        : Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Evidence not available")));
-    }
-
-    /** Evidence is removed as soon as a job finishes so raw memory never lingers on the volume. */
-    private Mono<Void> deleteEvidence(String id) {
-        Path dir = props.uploadDir().resolve(id);
-        return Mono.<Void>fromRunnable(() -> {
-            if (!Files.exists(dir)) {
-                return;
-            }
-            try (Stream<Path> paths = Files.walk(dir)) {
-                paths.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
-            } catch (IOException e) {
-                log.warn("Failed to delete evidence for job {}: {}", id, e.getMessage());
-            }
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    private Job toJob(Map<String, String> m) {
-        String result = m.get("result");
-        return new Job(
-                m.get("id"),
-                m.get("filename"),
-                Long.parseLong(m.getOrDefault("sizeBytes", "0")),
-                m.get("sha256"),
-                m.get("plugin"),
-                JobStatus.valueOf(m.get("status")),
-                Integer.parseInt(m.getOrDefault("progress", "0")),
-                m.get("message"),
-                m.get("createdAt"),
-                m.get("updatedAt"),
-                result == null ? null : json.readTree(result));
-    }
-
-    private static String key(String id) {
-        return "job:" + id;
+    private static ResponseStatusException notFound() {
+        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Job not found");
     }
 
     private static void requireUuid(String id) {
@@ -183,20 +160,5 @@ public class JobService {
         String base = Path.of(name).getFileName().toString();
         String clean = base.replaceAll("[^A-Za-z0-9._-]", "_");
         return clean.length() > 128 ? clean.substring(0, 128) : clean;
-    }
-
-    private static String sha256(Path file) throws IOException, NoSuchAlgorithmException {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        byte[] buf = new byte[1 << 20];
-        try (InputStream in = Files.newInputStream(file)) {
-            int n;
-            while ((n = in.read(buf)) != -1) {
-                digest.update(buf, 0, n);
-            }
-        }
-        return HexFormat.of().formatHex(digest.digest());
-    }
-
-    private record Evidence(long size, String sha256) {
     }
 }

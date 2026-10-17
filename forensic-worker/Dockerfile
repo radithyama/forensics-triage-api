@@ -19,7 +19,7 @@ RUN mkdir -p /symbols && if [ "$VOL_SYMBOLS" = "windows" ]; then \
 # ---- Runtime: slim, non-root, no build tooling ----
 FROM python:3.12-slim
 RUN groupadd -g 10001 worker && useradd -u 10001 -g worker -M -s /usr/sbin/nologin worker \
- && mkdir -p /work /cache && chown worker:worker /work /cache \
+ && mkdir -p /cache && chown worker:worker /cache \
  # Drop setuid/setgid bits so nothing in the image can escalate privileges.
  && find / -xdev -perm /6000 -type f -exec chmod a-s {} +
 COPY --from=build /opt/venv /opt/venv
@@ -29,13 +29,14 @@ COPY worker ./worker
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    WORK_DIR=/work \
+    WORK_DIR=/tmp/work \
     VOL_CACHE_DIR=/cache \
     HOME=/cache \
     VOL_SYMBOL_DIRS=/symbols \
-    HEARTBEAT_FILE=/tmp/worker-heartbeat
+    PORT=8080
 USER 10001
-# Healthy while the main loop keeps touching its heartbeat (it does so at least every ~5s when idle).
-HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
-  CMD python -c "import os,sys,time; sys.exit(time.time()-os.path.getmtime('/tmp/worker-heartbeat') > 60)"
-ENTRYPOINT ["python", "-m", "worker.main"]
+EXPOSE 8080
+# One analysis per instance (Cloud Run --concurrency=1); no gunicorn timeout because a push request
+# legitimately runs for minutes. Cloud Run's request timeout is the outer bound.
+CMD exec gunicorn --bind ":${PORT}" --workers 1 --threads 1 --timeout 0 --graceful-timeout 30 \
+    --access-logfile - "worker.app:create_app()"

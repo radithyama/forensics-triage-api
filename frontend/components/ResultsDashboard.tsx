@@ -45,7 +45,7 @@ export function ResultsDashboard({ job }: { job: Job }) {
         </div>
         <div className="evidence__hash">
           <span className="kicker">SHA-256 (verified by worker)</span>
-          <code>{result.evidenceSha256 ?? job.sha256}</code>
+          <code>{result.evidenceSha256 ?? job.sha256 ?? "—"}</code>
         </div>
       </div>
 

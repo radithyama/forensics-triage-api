@@ -49,6 +49,7 @@ export default function Home() {
       let job = await uploadEvidence(file, plugin, (fraction) => setPhase({ kind: "uploading", fraction }), signal);
       setPhase({ kind: "job", job });
       while (job.status !== "COMPLETED" && job.status !== "FAILED") {
+        // Cloud Run scales the worker from zero, so the first poll may take a few seconds to move.
         await new Promise((r) => setTimeout(r, POLL_MS));
         if (signal.aborted) return;
         job = await fetchJob(job.id, signal);
