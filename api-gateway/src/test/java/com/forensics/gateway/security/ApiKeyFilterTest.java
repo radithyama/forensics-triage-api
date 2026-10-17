@@ -18,7 +18,7 @@ class ApiKeyFilterTest {
     static final String KEY = "Abcdefghijklmnopqrstuvwxyz0123456789";
 
     static TriageProperties props(String key) {
-        return new TriageProperties("p", "b", "t", Duration.ofMinutes(5), DataSize.ofGigabytes(6),
+        return new TriageProperties("p", "b", "t", Duration.ofMinutes(5), DataSize.ofMegabytes(10), DataSize.ofGigabytes(6),
                 List.of("https://frontend.example"), List.of("windows.pslist.PsList"), null, key);
     }
 

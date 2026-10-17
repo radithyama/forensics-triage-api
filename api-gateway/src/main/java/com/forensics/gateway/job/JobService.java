@@ -1,7 +1,9 @@
 package com.forensics.gateway.job;
 
-import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -39,6 +41,7 @@ public class JobService {
 
     private static final Logger log = LoggerFactory.getLogger(JobService.class);
     static final String UPLOAD_CONTENT_TYPE = "application/octet-stream";
+    static final String CONTENT_LENGTH_RANGE = "x-goog-content-length-range";
 
     private final Storage storage;
     private final ObjectProvider<Publisher> publisher;
@@ -55,29 +58,46 @@ public class JobService {
     }
 
     public Mono<CreateJobResponse> create(CreateJobRequest req) {
-        String plugin = (req.plugin() == null || req.plugin().isBlank()) ? TriageProperties.DEFAULT_PLUGIN : req.plugin().trim();
+        String plugin = req.plugin() == null ? TriageProperties.DEFAULT_PLUGIN : req.plugin();
         if (!props.allowedPlugins().contains(plugin)) {
             return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported plugin: " + plugin));
         }
-        if (req.sizeBytes() > props.maxUploadSize().toBytes()) {
-            return Mono.error(new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE,
-                    "Evidence exceeds the " + props.maxUploadSize().toGigabytes() + " GB limit"));
+        long min = props.minUploadSize().toBytes();
+        long max = props.maxUploadSize().toBytes();
+        if (req.sizeBytes() < min || req.sizeBytes() > max) {
+            HttpStatus status = req.sizeBytes() > max ? HttpStatus.PAYLOAD_TOO_LARGE : HttpStatus.BAD_REQUEST;
+            return Mono.error(new ResponseStatusException(status, "Evidence must be between %d MB and %d GB"
+                    .formatted(props.minUploadSize().toMegabytes(), props.maxUploadSize().toGigabytes())));
         }
 
         String id = UUID.randomUUID().toString();
         String now = Instant.now().toString();
-        Job job = new Job(id, sanitize(req.filename()), req.sizeBytes(), null, null, plugin,
+        Job job = new Job(id, req.filename(), req.sizeBytes(), null, null, plugin,
                 JobStatus.AWAITING_UPLOAD, 0, "Waiting for evidence upload", now, now, null);
 
+        // Everything below is part of the V4 signature: GCS rejects the PUT if the client changes the
+        // method, Content-Type, Content-MD5 or sends a body outside the length range, or after the TTL.
+        Map<String, String> headers = new LinkedHashMap<>();
+        headers.put("Content-Type", UPLOAD_CONTENT_TYPE);
+        headers.put(CONTENT_LENGTH_RANGE, min + "," + max);
+        BlobInfo.Builder target = BlobInfo.newBuilder(evidenceId(id)).setContentType(UPLOAD_CONTENT_TYPE);
+        List<Storage.SignUrlOption> options = new ArrayList<>(List.of(
+                Storage.SignUrlOption.httpMethod(HttpMethod.PUT),
+                Storage.SignUrlOption.withContentType(),
+                Storage.SignUrlOption.withExtHeaders(Map.of(CONTENT_LENGTH_RANGE, min + "," + max)),
+                Storage.SignUrlOption.withV4Signature()));
+        if (req.md5() != null) {
+            target.setMd5(req.md5());
+            options.add(Storage.SignUrlOption.withMd5());
+            headers.put("Content-MD5", req.md5());
+        }
+
         return jobs.create(job)
-                .then(Mono.fromCallable(() -> storage.signUrl(
-                                BlobInfo.newBuilder(evidenceId(id)).setContentType(UPLOAD_CONTENT_TYPE).build(),
-                                props.uploadUrlTtl().toSeconds(), TimeUnit.SECONDS,
-                                Storage.SignUrlOption.httpMethod(HttpMethod.PUT),
-                                Storage.SignUrlOption.withContentType(),
-                                Storage.SignUrlOption.withV4Signature()))
+                .then(Mono.fromCallable(() -> storage.signUrl(target.build(), props.uploadUrlTtl().toSeconds(), TimeUnit.SECONDS,
+                                options.toArray(Storage.SignUrlOption[]::new)))
                         .subscribeOn(Schedulers.boundedElastic()))
-                .map(url -> new CreateJobResponse(job, url.toString(), "PUT", Map.of("Content-Type", UPLOAD_CONTENT_TYPE)));
+                .map(url -> new CreateJobResponse(job, url.toString(), "PUT", headers,
+                        Instant.now().plus(props.uploadUrlTtl()).toString()));
     }
 
     public Mono<Job> start(String id) {
@@ -96,14 +116,14 @@ public class JobService {
     }
 
     private Mono<Job> enqueue(JobStore.Stored stored, Blob blob) {
-        if (blob.getSize() == 0) {
-            return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Uploaded file is empty"));
-        }
-        if (blob.getSize() > props.maxUploadSize().toBytes()) {
-            // The signed URL can't cap size, so enforce it here and discard the oversized object.
+        // GCS already enforced these through the signed headers; re-checking defends against any object
+        // that reached this path some other way (e.g. an operator copying files into the bucket).
+        boolean sizeOk = blob.getSize() >= props.minUploadSize().toBytes() && blob.getSize() <= props.maxUploadSize().toBytes();
+        if (!sizeOk || !UPLOAD_CONTENT_TYPE.equals(blob.getContentType())) {
             return Mono.fromRunnable(() -> storage.delete(blob.getBlobId()))
                     .subscribeOn(Schedulers.boundedElastic())
-                    .then(Mono.error(new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Evidence exceeds the size limit")));
+                    .then(Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "Uploaded object violates the size or content-type policy and was discarded")));
         }
 
         Job previous = stored.job();
@@ -152,14 +172,5 @@ public class JobService {
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid job id");
         }
-    }
-
-    static String sanitize(String name) {
-        if (name == null || name.isBlank()) {
-            return "memory.img";
-        }
-        String base = Path.of(name).getFileName().toString();
-        String clean = base.replaceAll("[^A-Za-z0-9._-]", "_");
-        return clean.length() > 128 ? clean.substring(0, 128) : clean;
     }
 }

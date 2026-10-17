@@ -43,7 +43,8 @@ class JobServiceFlowTest {
     @BeforeEach
     void setUp() {
         TriageProperties props = new TriageProperties("proj", "evidence-bucket", "forensic-jobs",
-                Duration.ofMinutes(30), DataSize.ofGigabytes(6), List.of(), List.of("windows.pslist.PsList"), null, "k".repeat(32));
+                Duration.ofMinutes(5), DataSize.ofMegabytes(10), DataSize.ofGigabytes(6), List.of(),
+                List.of("windows.pslist.PsList"), null, "k".repeat(32));
         var beans = new StaticListableBeanFactory(java.util.Map.of("publisher", publisher));
         service = new JobService(storage, beans.getBeanProvider(Publisher.class), store, props, json);
     }
@@ -60,12 +61,42 @@ class JobServiceFlowTest {
 
     @Test
     void createRejectsPluginsOutsideAllowList() {
-        expectStatus(service.create(new CreateJobRequest("a.raw", 10, "windows.hashdump.Hashdump")), HttpStatus.BAD_REQUEST);
+        expectStatus(service.create(new CreateJobRequest("a.raw", 64L << 20, "windows.hashdump.Hashdump", null)), HttpStatus.BAD_REQUEST);
     }
 
     @Test
     void createRejectsOversizedEvidence() {
-        expectStatus(service.create(new CreateJobRequest("a.raw", DataSize.ofGigabytes(7).toBytes(), null)), HttpStatus.PAYLOAD_TOO_LARGE);
+        expectStatus(service.create(new CreateJobRequest("a.raw", DataSize.ofGigabytes(6).toBytes() + 1, null, null)), HttpStatus.PAYLOAD_TOO_LARGE);
+    }
+
+    @Test
+    void createRejectsEvidenceBelowTenMegabytes() {
+        expectStatus(service.create(new CreateJobRequest("a.raw", DataSize.ofMegabytes(10).toBytes() - 1, null, null)), HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    void createSignsLengthRangeContentTypeAndOptionalMd5() throws Exception {
+        when(store.create(any())).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+        when(storage.signUrl(any(), anyLong(), any(), any(Storage.SignUrlOption[].class)))
+                .thenReturn(java.net.URI.create("https://storage.googleapis.com/b/o?X-Goog-Signature=x").toURL());
+
+        StepVerifier.create(service.create(new CreateJobRequest("a.raw", 64L << 20, null, "1B2M2Y8AsgTpgAmY7PhCfg==")))
+                .assertNext(r -> {
+                    assertThat(r.uploadHeaders()).containsEntry("Content-Type", "application/octet-stream")
+                            .containsEntry("x-goog-content-length-range", "10485760,6442450944")
+                            .containsEntry("Content-MD5", "1B2M2Y8AsgTpgAmY7PhCfg==");
+                    assertThat(java.time.Instant.parse(r.uploadUrlExpiresAt()))
+                            .isBefore(java.time.Instant.now().plusSeconds(301));
+                })
+                .verifyComplete();
+        verify(storage).signUrl(any(), eq(300L), eq(java.util.concurrent.TimeUnit.SECONDS), any(Storage.SignUrlOption[].class));
+    }
+
+    @Test
+    void uploadUrlTtlAboveFiveMinutesIsRejectedAtStartup() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new TriageProperties("p", "b", "t", Duration.ofMinutes(6),
+                DataSize.ofMegabytes(10), DataSize.ofGigabytes(6), List.of(), List.of(), null, null))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -85,7 +116,8 @@ class JobServiceFlowTest {
     @Test
     void startPinsGenerationAndMd5ThenPublishes() {
         Blob blob = mock(Blob.class);
-        when(blob.getSize()).thenReturn(4096L);
+        when(blob.getSize()).thenReturn(64L << 20);
+        when(blob.getContentType()).thenReturn("application/octet-stream");
         when(blob.getMd5()).thenReturn("q83vEjRWeJA=");
         when(blob.getGeneration()).thenReturn(1712L);
         when(blob.getBucket()).thenReturn("evidence-bucket");
@@ -98,7 +130,7 @@ class JobServiceFlowTest {
         StepVerifier.create(service.start(ID))
                 .assertNext(j -> {
                     assertThat(j.status()).isEqualTo(JobStatus.QUEUED);
-                    assertThat(j.sizeBytes()).isEqualTo(4096L);
+                    assertThat(j.sizeBytes()).isEqualTo(64L << 20);
                     assertThat(j.md5()).isEqualTo("q83vEjRWeJA=");
                 })
                 .verifyComplete();
@@ -112,9 +144,22 @@ class JobServiceFlowTest {
     }
 
     @Test
+    void startDiscardsObjectsWithWrongContentType() {
+        Blob blob = mock(Blob.class);
+        when(blob.getSize()).thenReturn(64L << 20);
+        when(blob.getContentType()).thenReturn("text/html");
+        when(store.get(ID)).thenReturn(Mono.just(new JobStore.Stored(job(JobStatus.AWAITING_UPLOAD), 7)));
+        when(storage.get(any(BlobId.class))).thenReturn(blob);
+        expectStatus(service.start(ID), HttpStatus.BAD_REQUEST);
+        verify(storage).delete(blob.getBlobId());
+        verify(publisher, never()).publish(any());
+    }
+
+    @Test
     void failedPublishRollsBackSoStartCanBeRetried() {
         Blob blob = mock(Blob.class);
-        when(blob.getSize()).thenReturn(10L);
+        when(blob.getSize()).thenReturn(64L << 20);
+        when(blob.getContentType()).thenReturn("application/octet-stream");
         when(store.get(ID)).thenReturn(Mono.just(new JobStore.Stored(job(JobStatus.AWAITING_UPLOAD), 7)));
         when(storage.get(any(BlobId.class))).thenReturn(blob);
         when(store.replace(any(), anyLong())).thenAnswer(inv -> Mono.just(inv.getArgument(0)));

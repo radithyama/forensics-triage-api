@@ -9,6 +9,10 @@ spring:
   web:
     error:
       include-message: always
+      include-binding-errors: always
+  codec:
+    # API bodies are tiny JSON documents; refuse anything bigger before it is buffered.
+    max-in-memory-size: 16KB
 
 management:
   endpoints:
@@ -24,7 +28,10 @@ triage:
   project-id: ${GOOGLE_CLOUD_PROJECT:}
   bucket: ${EVIDENCE_BUCKET:}
   topic: ${JOBS_TOPIC:forensic-jobs}
-  upload-url-ttl: ${UPLOAD_URL_TTL:30m}
+  upload-url-ttl: ${UPLOAD_URL_TTL:5m}
+  # Enforced by GCS itself via the signed x-goog-content-length-range header. The 6 GB ceiling
+  # matches what the 8 GiB worker can hold in its in-memory /tmp.
+  min-upload-size: ${MIN_UPLOAD_SIZE:10MB}
   max-upload-size: ${MAX_UPLOAD_SIZE:6GB}
   allowed-origins: ${ALLOWED_ORIGINS:http://localhost:3000}
   # Access code: read once at startup from Secret Manager (production) or given directly (local dev only).
