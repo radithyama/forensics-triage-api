@@ -8,9 +8,10 @@ Fully serverless on Google Cloud: three Cloud Run services, one GCS bucket and P
 component scales to zero, so an idle deployment costs close to nothing.
 
 ```
-                 ① POST /api/jobs ─────────► api-gateway (Cloud Run, public)
- browser ──► frontend (Cloud Run, nginx)        │  returns a V4 signed URL, writes jobs/<id>.json
-    │            ③ POST /api/jobs/<id>/start ──►│  pins object generation + MD5, publishes
+   static UI ◄── frontend (Cloud Run, nginx)
+ browser ──① POST /api/jobs  (X-API-Key) ────► api-gateway (Cloud Run, public; CORS, key, rate limit)
+    │      ③ POST /api/jobs/<id>/start ─────►│  signed URL (5 min, 10 MB–6 GB), writes jobs/<id>.json
+    │                                           │  pins object generation + MD5, publishes
     │                                           ▼
     └─② PUT evidence ──► GCS bucket ◄──── Pub/Sub topic ──push (OIDC)──► forensic-worker (Cloud Run, private)
                          evidence/<id>/…                                  │ downloads to /tmp, verifies MD5,
@@ -20,22 +21,30 @@ component scales to zero, so an idle deployment costs close to nothing.
 
 | Service | Stack | Role |
 |---|---|---|
-| `frontend/` | Next.js 16 static export, nginx | Upload UI, progress, process tree, findings. **Simulation Mode** replays bundled data; **Live Trial** uploads for real. nginx proxies `/api` to the gateway. |
+| `frontend/` | Next.js 16 static export, nginx | Upload UI, progress, process tree, findings. **Simulation Mode** replays bundled data; **Live Trial** needs the access code and uploads for real. nginx serves a runtime `/config.js` with the gateway URL. |
 | `api-gateway/` | Java 21, Spring Boot 4 WebFlux, GCS + Pub/Sub clients | Job registration, signed upload URLs, start/queue, status reads. |
 | `forensic-worker/` | Python 3.12, Flask + gunicorn, Volatility 3 | Pub/Sub push endpoint; one analysis per instance. |
 
 ## API
 
+Every `/api/**` call needs the access code in `X-API-Key` (get it with
+`gcloud secrets versions access latest --secret=triage-api-key`).
+
 ```bash
-# 1. Register the job; get a signed URL
-curl -X POST $HOST/api/jobs -H 'content-type: application/json' \
+H="X-API-Key: $ACCESS_CODE"
+# 1. Register the job; get a 5-minute signed URL plus the exact headers it was signed with
+curl -X POST $GATEWAY/api/jobs -H "$H" -H 'content-type: application/json' \
      -d '{"filename":"WIN10.raw","sizeBytes":4294967296,"plugin":"windows.pslist.PsList"}'
-# 2. Upload straight to Cloud Storage (exact Content-Type is part of the signature)
-curl -X PUT -H 'Content-Type: application/octet-stream' --data-binary @WIN10.raw "$UPLOAD_URL"
+#    optional: "md5":"<base64 MD5>" binds Content-MD5 into the signature
+# 2. Upload straight to Cloud Storage, sending every header from uploadHeaders verbatim
+curl -X PUT -H 'Content-Type: application/octet-stream' \
+     -H 'x-goog-content-length-range: 10485760,6442450944' --data-binary @WIN10.raw "$UPLOAD_URL"
 # 3. Queue it, then poll
-curl -X POST $HOST/api/jobs/<id>/start
-curl $HOST/api/jobs/<id>
+curl -X POST $GATEWAY/api/jobs/<id>/start -H "$H"
+curl $GATEWAY/api/jobs/<id> -H "$H"
 ```
+
+`GET /api/session` returns 204 for a valid code (the UI uses it to check codes).
 
 Statuses: `AWAITING_UPLOAD → QUEUED → RUNNING (progress 0–100) → COMPLETED | FAILED`. Allowed plugins:
 `windows.pslist.PsList`, `windows.pstree.PsTree`, `windows.cmdline.CmdLine`, `windows.netscan.NetScan`,
@@ -51,15 +60,33 @@ PROJECT_ID=my-project ./deploy/cloudrun-deploy.sh
 ```
 
 The script is idempotent. It creates the bucket (1-day lifecycle, no soft-delete, public access
-prevention), the Pub/Sub topic, dead-letter topic and OIDC push subscription, and one service
-account per workload with resource-scoped roles. It builds the images with Cloud Build, deploys the
-three services and sets bucket CORS for the frontend origin.
+prevention), the access-code secret, the Pub/Sub topic, dead-letter topic and OIDC push subscription,
+and one service account per workload with resource-scoped roles. It builds the images with Cloud
+Build, deploys the three services and sets CORS on both the gateway and the bucket for the frontend
+origins. `cloudbuild.web.yaml` rebuilds just the frontend and gateway.
 
 ## Develop
 
 Tests: `mvn test` (gateway), `pytest` (worker), `npm run lint && npm run build` (frontend).
-`NEXT_PUBLIC_API_BASE=https://<gateway-url> npm run dev` runs the UI against a deployed gateway.
+`NEXT_PUBLIC_API_BASE=http://localhost:8080 npm run dev` runs the UI against a local gateway started
+with `API_KEY=<any 24+ chars> ALLOWED_ORIGINS=http://localhost:3000`.
 Simulation Mode needs no backend at all.
+
+## Abuse and Denial-of-Wallet controls
+
+All of these run inside the existing services, with no load balancer or other fixed-cost infrastructure.
+
+| Control | Where | Behaviour |
+|---|---|---|
+| Access code | Gateway `ApiKeyFilter` | `X-API-Key` required on all `/api/**`. Loaded once from Secret Manager at startup (fails closed if missing or weak), compared in constant time. Missing or wrong → **401**. |
+| Rate limit | Gateway `RateLimitFilter` | Token bucket, **10 per hour per client IP** on `POST /api/jobs` and `/start`. **Wrong access codes spend the same tokens**, so brute force is capped too. Over the limit → **429** with `Retry-After`. Status polling isn't limited. |
+| Client IP | `ClientIp` | Last `X-Forwarded-For` hop, which Google's front end appends. Spoofed earlier hops are ignored (verified live). |
+| Instance cap | Cloud Run | Gateway `max-instances=1` keeps the in-memory limiter global. Worker `max-instances=3` and concurrency 1 bound worst-case spend. |
+| Strict CORS | Gateway | Only the two frontend origins, only GET/POST with `Content-Type` and `X-API-Key`. Any other Origin → **403**. |
+| Upload policy | V4 signed URL | Signed `x-goog-content-length-range: 10 MB–6 GB` and `Content-Type: application/octet-stream`; optional `Content-MD5`; **5-minute** expiry (longer TTLs are refused at startup). GCS itself rejects violations (`EntityTooSmall` / `EntityTooLarge` / 403). |
+| Input validation | `CreateJobRequest` | Filenames must be plain names with a memory-image extension (traversal, separators, hidden files and odd characters are rejected, not sanitized). Plugin shape, base64 MD5 and size range are checked; request bodies are capped at 16 KB. |
+| Error hygiene | `SafeErrorAttributes` | 5xx responses never echo library exception text (bucket names, URLs). |
+| CSP | Frontend nginx | `connect-src` allows only the gateway origin and `storage.googleapis.com`. |
 
 ## Security design
 
@@ -75,5 +102,6 @@ Simulation Mode needs no backend at all.
 
 - **Evidence size depends on worker memory.** `/tmp` on Cloud Run is in memory, so the worker (8 GiB) handles images up to about 6 GB; larger images fail with a clear message. Raise `--memory` (up to 32 GiB) for bigger images. The gateway's `MAX_UPLOAD_SIZE` is 6 GB to match.
 - **Analysis time limit.** Each analysis must finish within 540 s, which keeps it inside Pub/Sub's 600 s push acknowledgement window.
-- **No authentication on the public UI.** Put the frontend and gateway behind IAP or another login layer before uploading real case evidence.
+- **The access code is shared, not per-user.** Rotate it by adding a new secret version and redeploying the gateway (it reads the key at startup). For real case evidence, use per-user identity (for example IAP) instead.
+- **Rate-limit state is in memory.** A gateway restart or new revision resets the buckets. That is acceptable for spam control, but it isn't an audit log.
 - **Symbols are downloaded at runtime.** Volatility fetches Windows PDB symbols from Microsoft on demand. Build the worker with `--build-arg VOL_SYMBOLS=windows` to bake them in.

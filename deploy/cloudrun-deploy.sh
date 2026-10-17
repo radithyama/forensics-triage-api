@@ -25,7 +25,7 @@ quiet() { "$@" --format=none >/dev/null; }
 echo "==> ${PROJECT_ID} / ${REGION}, images ${REGISTRY}:${TAG}"
 gcloud config set project "${PROJECT_ID}" >/dev/null
 gcloud services enable run.googleapis.com pubsub.googleapis.com storage.googleapis.com \
-  iamcredentials.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com
+  iamcredentials.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com secretmanager.googleapis.com
 
 # ---------- Service accounts (one per workload; none have keys) ----------
 for name in forensics-builder triage-gateway triage-worker triage-frontend triage-pubsub-push; do
@@ -52,6 +52,13 @@ quiet gcloud artifacts repositories add-iam-policy-binding "${REPO}" --location=
 gcloud builds submit --config cloudbuild.yaml --service-account="projects/${PROJECT_ID}/serviceAccounts/${BUILD_SA}" \
   --substitutions "_REGISTRY=${REGISTRY},_TAG=${TAG}" .
 
+# ---------- Access code (X-API-Key) in Secret Manager; generated once, never printed ----------
+if ! gcloud secrets describe triage-api-key >/dev/null 2>&1; then
+  LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 40 |
+    gcloud secrets create triage-api-key --replication-policy=user-managed --locations="${REGION}" --data-file=-
+fi
+quiet gcloud secrets add-iam-policy-binding triage-api-key --member="serviceAccount:${GW_SA}" --role=roles/secretmanager.secretAccessor
+
 # ---------- Pub/Sub topics ----------
 gcloud pubsub topics describe "${TOPIC}" >/dev/null 2>&1 || gcloud pubsub topics create "${TOPIC}"
 gcloud pubsub topics describe "${DLQ}" >/dev/null 2>&1 || gcloud pubsub topics create "${DLQ}"
@@ -74,16 +81,25 @@ WORKER_URL="$(gcloud run services describe forensic-worker --region="${REGION}" 
 quiet gcloud run services add-iam-policy-binding forensic-worker --region="${REGION}" --member="serviceAccount:${PUSH_SA}" --role=roles/run.invoker
 
 FRONTEND_URL="https://frontend-${PROJECT_NUMBER}.${REGION}.run.app"
+GATEWAY_URL="https://api-gateway-${PROJECT_NUMBER}.${REGION}.run.app"
+gateway_env() {  # $1 = comma-separated allowed origins; ^@^ switches gcloud's list delimiter to '@'
+  echo "^@^GOOGLE_CLOUD_PROJECT=${PROJECT_ID}@EVIDENCE_BUCKET=${BUCKET}@JOBS_TOPIC=${TOPIC}@MIN_UPLOAD_SIZE=10MB@MAX_UPLOAD_SIZE=6GB@UPLOAD_URL_TTL=5m@API_KEY_SECRET=projects/${PROJECT_ID}/secrets/triage-api-key/versions/latest@RATE_LIMIT_REQUESTS=10@RATE_LIMIT_PERIOD=1h@ALLOWED_ORIGINS=$1"
+}
+# max-instances=1 keeps the in-memory rate limiter global (one instance serves 80 concurrent requests).
 gcloud run deploy api-gateway --image="${REGISTRY}/api-gateway:${TAG}" --region="${REGION}" \
   --allow-unauthenticated --service-account="${GW_SA}" \
-  --cpu=1 --memory=1Gi --cpu-boost --concurrency=80 --timeout=60 --min-instances=0 --max-instances=3 \
-  --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},EVIDENCE_BUCKET=${BUCKET},JOBS_TOPIC=${TOPIC},MAX_UPLOAD_SIZE=6GB,ALLOWED_ORIGINS=${FRONTEND_URL}" --quiet
-GATEWAY_HOST="$(gcloud run services describe api-gateway --region="${REGION}" --format='value(status.url)' | sed 's#https://##')"
+  --cpu=1 --memory=1Gi --cpu-boost --concurrency=80 --timeout=60 --min-instances=0 --max-instances=1 \
+  --set-env-vars="$(gateway_env "${FRONTEND_URL}")" --quiet
 
 gcloud run deploy frontend --image="${REGISTRY}/frontend:${TAG}" --region="${REGION}" \
   --allow-unauthenticated --service-account="${FE_SA}" --port=8080 \
   --cpu=1 --memory=256Mi --concurrency=200 --min-instances=0 --max-instances=3 \
-  --set-env-vars="API_UPSTREAM_URL=https://${GATEWAY_HOST},API_UPSTREAM_HOST=${GATEWAY_HOST}" --quiet
+  --set-env-vars="API_BASE_URL=${GATEWAY_URL}" --quiet
+
+# The frontend also has a legacy hash URL; allow both as CORS origins once it exists.
+LEGACY_URL="$(gcloud run services describe frontend --region="${REGION}" --format='value(status.url)')"
+ORIGINS="${FRONTEND_URL},${LEGACY_URL}"
+gcloud run services update api-gateway --region="${REGION}" --update-env-vars="$(gateway_env "${ORIGINS}")" --quiet
 
 # ---------- Push subscription: OIDC-authenticated, ack window covers one full analysis ----------
 if ! gcloud pubsub subscriptions describe "${SUB}" >/dev/null 2>&1; then
@@ -95,10 +111,10 @@ if ! gcloud pubsub subscriptions describe "${SUB}" >/dev/null 2>&1; then
 fi
 quiet gcloud pubsub subscriptions add-iam-policy-binding "${SUB}" --member="serviceAccount:${PUBSUB_AGENT}" --role=roles/pubsub.subscriber
 
-# ---------- Browser uploads go straight to GCS: allow PUT from the frontend's origins ----------
-LEGACY_URL="$(gcloud run services describe frontend --region="${REGION}" --format='value(status.url)')"
-echo "[{\"origin\":[\"${FRONTEND_URL}\",\"${LEGACY_URL}\"],\"method\":[\"PUT\"],\"responseHeader\":[\"Content-Type\"],\"maxAgeSeconds\":3600}]" > "${TMP}/cors.json"
+# ---------- Browser uploads go straight to GCS: allow PUT (with the signed headers) from the frontend ----------
+echo "[{\"origin\":[\"${FRONTEND_URL}\",\"${LEGACY_URL}\"],\"method\":[\"PUT\"],\"responseHeader\":[\"Content-Type\",\"Content-MD5\",\"x-goog-content-length-range\"],\"maxAgeSeconds\":3600}]" > "${TMP}/cors.json"
 gcloud storage buckets update "gs://${BUCKET}" --cors-file="${TMP}/cors.json"
 
 echo
 echo "Frontend: ${FRONTEND_URL}"
+echo "Access code: gcloud secrets versions access latest --secret=triage-api-key"
