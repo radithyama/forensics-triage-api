@@ -20,6 +20,24 @@ if ! gcloud artifacts repositories describe "${REPO}" --location "${REGION}" >/d
   gcloud artifacts repositories create "${REPO}" --repository-format=docker --location "${REGION}"
 fi
 
+# Newer projects give the default compute SA no roles. Builds run as a dedicated least-privilege SA,
+# and the nodes (default compute SA) get read-only access to this one repository.
+BUILD_SA="forensics-builder@${PROJECT_ID}.iam.gserviceaccount.com"
+NODE_SA="$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')-compute@developer.gserviceaccount.com"
+if ! gcloud iam service-accounts describe "${BUILD_SA}" >/dev/null 2>&1; then
+  gcloud iam service-accounts create forensics-builder --display-name="Forensics triage Cloud Build"
+  sleep 10
+fi
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" --member="serviceAccount:${BUILD_SA}" \
+  --role=roles/logging.logWriter --condition=None --format=none
+gcloud storage buckets create "gs://${PROJECT_ID}_cloudbuild" --location=US 2>/dev/null || true
+gcloud storage buckets add-iam-policy-binding "gs://${PROJECT_ID}_cloudbuild" --member="serviceAccount:${BUILD_SA}" \
+  --role=roles/storage.objectViewer --format=none
+gcloud artifacts repositories add-iam-policy-binding "${REPO}" --location="${REGION}" \
+  --member="serviceAccount:${BUILD_SA}" --role=roles/artifactregistry.writer --format=none
+gcloud artifacts repositories add-iam-policy-binding "${REPO}" --location="${REGION}" \
+  --member="serviceAccount:${NODE_SA}" --role=roles/artifactregistry.reader --format=none
+
 if ! gcloud container clusters describe "${CLUSTER}" --zone "${ZONE}" >/dev/null 2>&1; then
   # Dataplane V2 enforces the NetworkPolicies in k8s/networkpolicy.yaml.
   gcloud container clusters create "${CLUSTER}" \
@@ -31,7 +49,8 @@ if ! gcloud container clusters describe "${CLUSTER}" --zone "${ZONE}" >/dev/null
 fi
 gcloud container clusters get-credentials "${CLUSTER}" --zone "${ZONE}"
 
-gcloud builds submit --config cloudbuild.yaml --substitutions "_REGISTRY=${REGISTRY},_TAG=${TAG}" .
+gcloud builds submit --config cloudbuild.yaml \
+  --service-account="projects/${PROJECT_ID}/serviceAccounts/${BUILD_SA}" --substitutions "_REGISTRY=${REGISTRY},_TAG=${TAG}" .
 
 # Render manifests with the pushed image URLs.
 RENDERED="$(mktemp -d)"

@@ -14,6 +14,8 @@ spec:
       labels: { app.kubernetes.io/name: forensic-worker, app.kubernetes.io/part-of: forensics-triage }
     spec:
       automountServiceAccountToken: false
+      # Docker-link style env vars (e.g. REDIS_PORT=tcp://...) would clobber our REDIS_PORT config.
+      enableServiceLinks: false
       # Lets an in-flight analysis finish after SIGTERM before the pod is killed.
       terminationGracePeriodSeconds: 600
       securityContext:

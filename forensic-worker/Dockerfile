@@ -31,6 +31,7 @@ ENV PATH=/opt/venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     WORK_DIR=/work \
     VOL_CACHE_DIR=/cache \
+    HOME=/cache \
     VOL_SYMBOL_DIRS=/symbols \
     HEARTBEAT_FILE=/tmp/worker-heartbeat
 USER 10001

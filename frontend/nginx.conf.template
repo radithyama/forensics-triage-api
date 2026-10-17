@@ -29,6 +29,11 @@ server {
         proxy_send_timeout 900s;
     }
 
+    # Worker-only gateway routes: answer 404 here instead of falling through to the SPA.
+    location /internal/ {
+        return 404;
+    }
+
     location /_next/static/ {
         # `expires` (not add_header) so the server-level security headers are still inherited here.
         expires 1y;

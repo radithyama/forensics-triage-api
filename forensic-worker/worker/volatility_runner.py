@@ -55,6 +55,8 @@ def run_plugin(cfg: Config, image: Path, plugin: str,
     log.info("Running: %s", " ".join(cmd))
     env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "PYTHONPATH") if k in os.environ}
     env["PYTHONUNBUFFERED"] = "1"
+    # volatility3 creates ~/.cache/volatility3 at import time; HOME is read-only in the hardened container.
+    env["HOME"] = cfg.vol_cache_dir or str(image.parent)
 
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             stdin=subprocess.DEVNULL, env=env, cwd=str(image.parent),
