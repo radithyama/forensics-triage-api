@@ -81,10 +81,13 @@ public class JobService {
         headers.put("Content-Type", UPLOAD_CONTENT_TYPE);
         headers.put(CONTENT_LENGTH_RANGE, min + "," + max);
         BlobInfo.Builder target = BlobInfo.newBuilder(evidenceId(id)).setContentType(UPLOAD_CONTENT_TYPE);
+        // Content-Type goes in as an explicit signed header: withContentType() alone does not add it to
+        // a V4 signature's SignedHeaders, so GCS would accept any type.
         List<Storage.SignUrlOption> options = new ArrayList<>(List.of(
                 Storage.SignUrlOption.httpMethod(HttpMethod.PUT),
-                Storage.SignUrlOption.withContentType(),
-                Storage.SignUrlOption.withExtHeaders(Map.of(CONTENT_LENGTH_RANGE, min + "," + max)),
+                Storage.SignUrlOption.withExtHeaders(Map.of(
+                        "Content-Type", UPLOAD_CONTENT_TYPE,
+                        CONTENT_LENGTH_RANGE, min + "," + max)),
                 Storage.SignUrlOption.withV4Signature()));
         if (req.md5() != null) {
             target.setMd5(req.md5());
