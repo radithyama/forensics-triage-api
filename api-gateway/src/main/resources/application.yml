@@ -1,0 +1,44 @@
+server:
+  port: 8080
+  shutdown: graceful
+  error:
+    include-message: always
+
+spring:
+  application:
+    name: api-gateway
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  webflux:
+    multipart:
+      # Memory images are large: stream parts to disk, never buffer them in heap.
+      max-in-memory-size: 256KB
+      max-disk-usage-per-part: ${MAX_UPLOAD_SIZE:8GB}
+      max-parts: 4
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+triage:
+  upload-dir: ${UPLOAD_DIR:/data/uploads}
+  queue-key: ${QUEUE_KEY:forensics:jobs}
+  job-ttl: ${JOB_TTL:24h}
+  worker-token: ${WORKER_TOKEN:change-me-in-production}
+  allowed-origins: ${ALLOWED_ORIGINS:http://localhost:3000}
+  allowed-plugins:
+    - windows.pslist.PsList
+    - windows.pstree.PsTree
+    - windows.cmdline.CmdLine
+    - windows.netscan.NetScan
+    - windows.malfind.Malfind
+    - linux.pslist.PsList

@@ -1,0 +1,456 @@
+{
+  "id": "00000000-0000-4000-8000-000000000000",
+  "filename": "WIN10-WKSTN-042.raw",
+  "sizeBytes": 4294967296,
+  "sha256": "9f2c4d7a1be03c58e6a1f0d4b2c7e9a8513f6d20ab4c8e17d9f3b6a05c2e4d81",
+  "plugin": "windows.pslist.PsList",
+  "status": "COMPLETED",
+  "progress": 100,
+  "message": "Analysis complete",
+  "createdAt": "2026-10-17T09:00:00Z",
+  "updatedAt": "2026-10-17T09:00:47Z",
+  "result": {
+    "plugin": "windows.pslist.PsList",
+    "summary": {
+      "processCount": 29,
+      "rootCount": 6,
+      "findingCount": 6,
+      "highSeverity": 4
+    },
+    "findings": [
+      {
+        "severity": "high",
+        "rule": "duplicate-singleton",
+        "pid": 720,
+        "process": "lsass.exe",
+        "detail": "2 live instances of lsass.exe"
+      },
+      {
+        "severity": "high",
+        "rule": "masquerading-name",
+        "pid": 5520,
+        "process": "scvhost.exe",
+        "detail": "Name resembles svchost.exe"
+      },
+      {
+        "severity": "high",
+        "rule": "unexpected-parent",
+        "pid": 5604,
+        "process": "lsass.exe",
+        "detail": "Parent is svchost.exe (expected wininit.exe)"
+      },
+      {
+        "severity": "high",
+        "rule": "duplicate-singleton",
+        "pid": 5604,
+        "process": "lsass.exe",
+        "detail": "2 live instances of lsass.exe"
+      },
+      {
+        "severity": "medium",
+        "rule": "suspicious-child",
+        "pid": 5240,
+        "process": "powershell.exe",
+        "detail": "powershell.exe spawned by WINWORD.EXE"
+      },
+      {
+        "severity": "medium",
+        "rule": "lolbin-chain",
+        "pid": 5388,
+        "process": "rundll32.exe",
+        "detail": "rundll32.exe spawned by powershell.exe"
+      }
+    ],
+    "processTree": [
+      {
+        "pid": 4,
+        "ppid": 0,
+        "name": "System",
+        "offset": 18446643528525168640,
+        "threads": 162,
+        "handles": null,
+        "sessionId": null,
+        "wow64": false,
+        "createTime": "2026-10-14T08:01:00+00:00",
+        "exitTime": null,
+        "children": [
+          {
+            "pid": 108,
+            "ppid": 4,
+            "name": "Registry",
+            "offset": 18446643528525594624,
+            "threads": 4,
+            "handles": null,
+            "sessionId": null,
+            "wow64": false,
+            "createTime": "2026-10-14T08:01:01+00:00",
+            "exitTime": null,
+            "children": []
+          },
+          {
+            "pid": 372,
+            "ppid": 4,
+            "name": "smss.exe",
+            "offset": 18446643528526675968,
+            "threads": 2,
+            "handles": null,
+            "sessionId": null,
+            "wow64": false,
+            "createTime": "2026-10-14T08:01:02+00:00",
+            "exitTime": null,
+            "children": []
+          }
+        ]
+      },
+      {
+        "pid": 484,
+        "ppid": 476,
+        "name": "csrss.exe",
+        "offset": 18446643528527134720,
+        "threads": 11,
+        "handles": null,
+        "sessionId": 0,
+        "wow64": false,
+        "createTime": "2026-10-14T08:01:05+00:00",
+        "exitTime": null,
+        "children": []
+      },
+      {
+        "pid": 560,
+        "ppid": 476,
+        "name": "wininit.exe",
+        "offset": 18446643528527446016,
+        "threads": 1,
+        "handles": null,
+        "sessionId": 0,
+        "wow64": false,
+        "createTime": "2026-10-14T08:01:05+00:00",
+        "exitTime": null,
+        "children": [
+          {
+            "pid": 700,
+            "ppid": 560,
+            "name": "services.exe",
+            "offset": 18446643528528019456,
+            "threads": 7,
+            "handles": null,
+            "sessionId": 0,
+            "wow64": false,
+            "createTime": "2026-10-14T08:01:06+00:00",
+            "exitTime": null,
+            "children": [
+              {
+                "pid": 836,
+                "ppid": 700,
+                "name": "svchost.exe",
+                "offset": 18446643528528576512,
+                "threads": 14,
+                "handles": null,
+                "sessionId": 0,
+                "wow64": false,
+                "createTime": "2026-10-14T08:01:08+00:00",
+                "exitTime": null,
+                "children": [
+                  {
+                    "pid": 6200,
+                    "ppid": 836,
+                    "name": "WmiPrvSE.exe",
+                    "offset": 18446643528550547456,
+                    "threads": 8,
+                    "handles": null,
+                    "sessionId": 0,
+                    "wow64": false,
+                    "createTime": "2026-10-14T09:41:00+00:00",
+                    "exitTime": "2026-10-14T09:42:03+00:00",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "pid": 944,
+                "ppid": 700,
+                "name": "svchost.exe",
+                "offset": 18446643528529018880,
+                "threads": 11,
+                "handles": null,
+                "sessionId": 0,
+                "wow64": false,
+                "createTime": "2026-10-14T08:01:08+00:00",
+                "exitTime": null,
+                "children": []
+              },
+              {
+                "pid": 1180,
+                "ppid": 700,
+                "name": "svchost.exe",
+                "offset": 18446643528529985536,
+                "threads": 22,
+                "handles": null,
+                "sessionId": 0,
+                "wow64": false,
+                "createTime": "2026-10-14T08:01:10+00:00",
+                "exitTime": null,
+                "children": [
+                  {
+                    "pid": 5604,
+                    "ppid": 1180,
+                    "name": "lsass.exe",
+                    "offset": 18446643528548106240,
+                    "threads": 4,
+                    "handles": null,
+                    "sessionId": 0,
+                    "wow64": false,
+                    "createTime": "2026-10-14T09:14:30+00:00",
+                    "exitTime": null,
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "pid": 1412,
+                "ppid": 700,
+                "name": "spoolsv.exe",
+                "offset": 18446643528530935808,
+                "threads": 8,
+                "handles": null,
+                "sessionId": 0,
+                "wow64": false,
+                "createTime": "2026-10-14T08:01:14+00:00",
+                "exitTime": null,
+                "children": []
+              },
+              {
+                "pid": 2032,
+                "ppid": 700,
+                "name": "MsMpEng.exe",
+                "offset": 18446643528533475328,
+                "threads": 30,
+                "handles": null,
+                "sessionId": 0,
+                "wow64": false,
+                "createTime": "2026-10-14T08:01:20+00:00",
+                "exitTime": null,
+                "children": []
+              },
+              {
+                "pid": 2864,
+                "ppid": 700,
+                "name": "svchost.exe",
+                "offset": 18446643528536883200,
+                "threads": 6,
+                "handles": null,
+                "sessionId": 1,
+                "wow64": false,
+                "createTime": "2026-10-14T08:02:00+00:00",
+                "exitTime": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "pid": 720,
+            "ppid": 560,
+            "name": "lsass.exe",
+            "offset": 18446643528528101376,
+            "threads": 9,
+            "handles": null,
+            "sessionId": 0,
+            "wow64": false,
+            "createTime": "2026-10-14T08:01:06+00:00",
+            "exitTime": null,
+            "children": []
+          },
+          {
+            "pid": 860,
+            "ppid": 560,
+            "name": "fontdrvhost.ex",
+            "offset": 18446643528528674816,
+            "threads": 5,
+            "handles": null,
+            "sessionId": 0,
+            "wow64": false,
+            "createTime": "2026-10-14T08:01:08+00:00",
+            "exitTime": null,
+            "children": []
+          }
+        ]
+      },
+      {
+        "pid": 572,
+        "ppid": 552,
+        "name": "csrss.exe",
+        "offset": 18446643528527495168,
+        "threads": 13,
+        "handles": null,
+        "sessionId": 1,
+        "wow64": false,
+        "createTime": "2026-10-14T08:01:05+00:00",
+        "exitTime": null,
+        "children": []
+      },
+      {
+        "pid": 648,
+        "ppid": 552,
+        "name": "winlogon.exe",
+        "offset": 18446643528527806464,
+        "threads": 3,
+        "handles": null,
+        "sessionId": 1,
+        "wow64": false,
+        "createTime": "2026-10-14T08:01:06+00:00",
+        "exitTime": null,
+        "children": [
+          {
+            "pid": 1004,
+            "ppid": 648,
+            "name": "dwm.exe",
+            "offset": 18446643528529264640,
+            "threads": 15,
+            "handles": null,
+            "sessionId": 1,
+            "wow64": false,
+            "createTime": "2026-10-14T08:01:09+00:00",
+            "exitTime": null,
+            "children": []
+          }
+        ]
+      },
+      {
+        "pid": 3120,
+        "ppid": 3064,
+        "name": "explorer.exe",
+        "offset": 18446643528537931776,
+        "threads": 71,
+        "handles": null,
+        "sessionId": 1,
+        "wow64": false,
+        "createTime": "2026-10-14T08:02:30+00:00",
+        "exitTime": null,
+        "children": [
+          {
+            "pid": 3388,
+            "ppid": 3120,
+            "name": "OneDrive.exe",
+            "offset": 18446643528539029504,
+            "threads": 24,
+            "handles": null,
+            "sessionId": 1,
+            "wow64": true,
+            "createTime": "2026-10-14T08:03:00+00:00",
+            "exitTime": null,
+            "children": []
+          },
+          {
+            "pid": 4120,
+            "ppid": 3120,
+            "name": "chrome.exe",
+            "offset": 18446643528542027776,
+            "threads": 38,
+            "handles": null,
+            "sessionId": 1,
+            "wow64": false,
+            "createTime": "2026-10-14T08:15:00+00:00",
+            "exitTime": null,
+            "children": [
+              {
+                "pid": 4188,
+                "ppid": 4120,
+                "name": "chrome.exe",
+                "offset": 18446643528542306304,
+                "threads": 12,
+                "handles": null,
+                "sessionId": 1,
+                "wow64": false,
+                "createTime": "2026-10-14T08:15:02+00:00",
+                "exitTime": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "pid": 5012,
+            "ppid": 3120,
+            "name": "WINWORD.EXE",
+            "offset": 18446643528545681408,
+            "threads": 21,
+            "handles": null,
+            "sessionId": 1,
+            "wow64": false,
+            "createTime": "2026-10-14T09:12:00+00:00",
+            "exitTime": null,
+            "children": [
+              {
+                "pid": 5240,
+                "ppid": 5012,
+                "name": "powershell.exe",
+                "offset": 18446643528546615296,
+                "threads": 14,
+                "handles": null,
+                "sessionId": 1,
+                "wow64": false,
+                "createTime": "2026-10-14T09:13:41+00:00",
+                "exitTime": null,
+                "children": [
+                  {
+                    "pid": 5300,
+                    "ppid": 5240,
+                    "name": "conhost.exe",
+                    "offset": 18446643528546861056,
+                    "threads": 4,
+                    "handles": null,
+                    "sessionId": 1,
+                    "wow64": false,
+                    "createTime": "2026-10-14T09:13:41+00:00",
+                    "exitTime": null,
+                    "children": []
+                  },
+                  {
+                    "pid": 5388,
+                    "ppid": 5240,
+                    "name": "rundll32.exe",
+                    "offset": 18446643528547221504,
+                    "threads": 3,
+                    "handles": null,
+                    "sessionId": 1,
+                    "wow64": false,
+                    "createTime": "2026-10-14T09:13:58+00:00",
+                    "exitTime": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "pid": 5520,
+            "ppid": 3120,
+            "name": "scvhost.exe",
+            "offset": 18446643528547762176,
+            "threads": 6,
+            "handles": null,
+            "sessionId": 1,
+            "wow64": false,
+            "createTime": "2026-10-14T09:14:12+00:00",
+            "exitTime": null,
+            "children": []
+          },
+          {
+            "pid": 6012,
+            "ppid": 3120,
+            "name": "notepad.exe",
+            "offset": 18446643528549777408,
+            "threads": 1,
+            "handles": null,
+            "sessionId": 1,
+            "wow64": false,
+            "createTime": "2026-10-14T09:40:00+00:00",
+            "exitTime": null,
+            "children": []
+          }
+        ]
+      }
+    ],
+    "evidenceSha256": "9f2c4d7a1be03c58e6a1f0d4b2c7e9a8513f6d20ab4c8e17d9f3b6a05c2e4d81",
+    "durationSeconds": 47.3
+  }
+}

@@ -78,3 +78,6 @@ service-account*.json
 *.lime
 *.dd
 uploads/
+
+# Local tooling
+.claude/

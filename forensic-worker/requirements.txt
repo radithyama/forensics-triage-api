@@ -1,0 +1,5 @@
+volatility3==2.28.2
+# pefile lets Volatility fetch/convert Windows PDB symbols on demand
+pefile==2024.8.26
+redis==6.4.0
+requests==2.32.5
