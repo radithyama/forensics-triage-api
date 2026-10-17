@@ -1,0 +1,41 @@
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    server_tokens off;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'" always;
+
+    location = /healthz {
+        access_log off;
+        return 200 "ok\n";
+    }
+
+    # Only the public API is proxied; the gateway's /internal/** worker endpoints are never exposed.
+    location /api/ {
+        proxy_pass http://${API_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Memory images are multi-GB: stream straight through instead of buffering on nginx's disk.
+        client_max_body_size 0;
+        proxy_request_buffering off;
+        proxy_read_timeout 900s;
+        proxy_send_timeout 900s;
+    }
+
+    location /_next/static/ {
+        # `expires` (not add_header) so the server-level security headers are still inherited here.
+        expires 1y;
+        try_files $uri =404;
+    }
+
+    location / {
+        try_files $uri $uri.html $uri/ /index.html;
+    }
+}

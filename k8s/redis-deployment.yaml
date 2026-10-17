@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: forensics
+  labels: { app.kubernetes.io/name: redis, app.kubernetes.io/part-of: forensics-triage }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: redis }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: redis, app.kubernetes.io/part-of: forensics-triage }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: redis
+          image: redis:8-alpine
+          # Job state is ephemeral (24h TTL), so persistence is disabled.
+          args: ["--requirepass", "$(REDIS_PASSWORD)", "--save", "", "--appendonly", "no"]
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: triage-secrets, key: redis-password } }
+          ports:
+            - { name: redis, containerPort: 6379 }
+          readinessProbe:
+            exec: { command: ["sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"] }
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: redis }
+            periodSeconds: 15
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      volumes:
+        - name: data
+          emptyDir: { sizeLimit: 1Gi }

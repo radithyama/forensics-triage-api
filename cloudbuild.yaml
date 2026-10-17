@@ -1,0 +1,34 @@
+# Builds all three images in parallel and pushes them to Artifact Registry.
+#   gcloud builds submit --config cloudbuild.yaml \
+#     --substitutions=_REGISTRY=REGION-docker.pkg.dev/PROJECT/forensics,_TAG=$(git rev-parse --short HEAD)
+substitutions:
+  _REGISTRY: ""
+  _TAG: latest
+
+options:
+  env: ["DOCKER_BUILDKIT=1"]
+  logging: CLOUD_LOGGING_ONLY
+  dynamicSubstitutions: true
+
+steps:
+  - id: api-gateway
+    name: gcr.io/cloud-builders/docker
+    waitFor: ["-"]
+    args: ["build", "-t", "${_REGISTRY}/api-gateway:${_TAG}", "api-gateway"]
+
+  - id: forensic-worker
+    name: gcr.io/cloud-builders/docker
+    waitFor: ["-"]
+    args: ["build", "-t", "${_REGISTRY}/forensic-worker:${_TAG}", "forensic-worker"]
+
+  - id: frontend
+    name: gcr.io/cloud-builders/docker
+    waitFor: ["-"]
+    args: ["build", "-t", "${_REGISTRY}/frontend:${_TAG}", "frontend"]
+
+images:
+  - ${_REGISTRY}/api-gateway:${_TAG}
+  - ${_REGISTRY}/forensic-worker:${_TAG}
+  - ${_REGISTRY}/frontend:${_TAG}
+
+timeout: 1800s

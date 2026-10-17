@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: forensic-worker
+  namespace: forensics
+  labels: { app.kubernetes.io/name: forensic-worker, app.kubernetes.io/part-of: forensics-triage }
+# No Service for the worker: it only consumes from Redis and calls the gateway; nothing connects to it.
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app.kubernetes.io/name: forensic-worker }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: forensic-worker, app.kubernetes.io/part-of: forensics-triage }
+    spec:
+      automountServiceAccountToken: false
+      # Lets an in-flight analysis finish after SIGTERM before the pod is killed.
+      terminationGracePeriodSeconds: 600
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: forensic-worker
+          image: IMAGE_REGISTRY/forensic-worker:IMAGE_TAG
+          env:
+            - { name: REDIS_HOST, value: redis }
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: triage-secrets, key: redis-password } }
+            - name: WORKER_TOKEN
+              valueFrom: { secretKeyRef: { name: triage-secrets, key: worker-token } }
+            - { name: API_BASE_URL, value: "http://api-gateway:8080" }
+            - { name: VOL_TIMEOUT_SECONDS, value: "1800" }
+          livenessProbe:
+            exec:
+              command: ["python", "-c", "import os,sys,time; sys.exit(time.time()-os.path.getmtime('/tmp/worker-heartbeat') > 60)"]
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 500m, memory: 1Gi, ephemeral-storage: 1Gi }
+            limits: { cpu: "2", memory: 4Gi, ephemeral-storage: 24Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: work, mountPath: /work }
+            - { name: cache, mountPath: /cache }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: work
+          emptyDir: { sizeLimit: 20Gi }
+        - name: cache
+          emptyDir: { sizeLimit: 2Gi }
+        - name: tmp
+          emptyDir: { medium: Memory, sizeLimit: 64Mi }

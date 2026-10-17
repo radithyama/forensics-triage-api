@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: forensics
+  labels: { app.kubernetes.io/name: api-gateway, app.kubernetes.io/part-of: forensics-triage }
+spec:
+  # Evidence lives on this pod's emptyDir until a worker fetches it, so the gateway runs as a
+  # single replica. To scale out, move evidence to a GCS bucket (see README).
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: api-gateway }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: api-gateway, app.kubernetes.io/part-of: forensics-triage }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: api-gateway
+          image: IMAGE_REGISTRY/api-gateway:IMAGE_TAG
+          ports:
+            - { name: http, containerPort: 8080 }
+          env:
+            - { name: REDIS_HOST, value: redis }
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: triage-secrets, key: redis-password } }
+            - name: WORKER_TOKEN
+              valueFrom: { secretKeyRef: { name: triage-secrets, key: worker-token } }
+            - { name: MAX_UPLOAD_SIZE, value: 16GB }
+            # Browsers reach the API same-origin through the frontend's nginx proxy.
+            - { name: ALLOWED_ORIGINS, value: "http://localhost:3000" }
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 3
+            failureThreshold: 40
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 250m, memory: 512Mi, ephemeral-storage: 1Gi }
+            limits: { memory: 1Gi, ephemeral-storage: 40Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            # Holds both multipart spool (/data/tmp) and stored evidence (/data/uploads).
+            - { name: data, mountPath: /data }
+      volumes:
+        - name: data
+          emptyDir: { sizeLimit: 36Gi }
