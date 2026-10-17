@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AccessCodeModal } from "@/components/AccessCodeModal";
+import { HowItWorksModal } from "@/components/HowItWorksModal";
 import { ModeToggle, type Mode } from "@/components/ModeToggle";
 import { ProgressBar } from "@/components/ProgressBar";
 import { ResultsDashboard } from "@/components/ResultsDashboard";
@@ -29,6 +30,7 @@ export default function Home() {
   const [accessCode, setAccessCode] = useState<string | null>(null);
   // undefined = not decided yet (avoids flashing the modal before sessionStorage is read)
   const [modal, setModal] = useState<{ notice?: string } | null | undefined>(undefined);
+  const [showHow, setShowHow] = useState(false);
   const abort = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -110,6 +112,8 @@ export default function Home() {
         />
       )}
 
+      {showHow && <HowItWorksModal onClose={() => setShowHow(false)} />}
+
       <header className="topbar">
         <div>
           <h1>Memory Forensics Triage</h1>
@@ -120,6 +124,9 @@ export default function Home() {
             {accessCode ? "Access code active" : "Live Trial locked"}
             <button onClick={() => (accessCode ? requireCode() : setModal({}))}>{accessCode ? "Change" : "Unlock"}</button>
           </span>
+          <button className="btn-link" onClick={() => setShowHow(true)}>
+            How it works
+          </button>
           <ModeToggle
             mode={mode}
             disabled={busy}

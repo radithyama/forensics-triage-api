@@ -140,3 +140,70 @@ th { position: sticky; top: 0; background: var(--panel-2); font-size: 12px; colo
 .access-chip { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 .access-chip button { background: none; border: 0; color: var(--accent); cursor: pointer; font: inherit; padding: 0; }
 .topbar__right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+
+/* ---------- Header link ---------- */
+.btn-link { background: none; border: 0; padding: 4px 2px; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
+.btn-link:hover, .btn-link:focus-visible { color: var(--text); text-decoration-color: var(--accent); }
+
+/* ---------- Info tooltips ---------- */
+.infotip { position: relative; display: inline-flex; align-items: center; }
+.infotip__trigger { background: none; border: 0; padding: 0 2px; margin: 0; color: var(--muted); font-size: 14px; line-height: 1; cursor: help; border-radius: 4px; }
+.infotip__trigger:hover, .infotip__trigger:focus-visible, .infotip--open .infotip__trigger { color: var(--accent); }
+.infotip__trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.infotip__bubble {
+  position: absolute; bottom: calc(100% + 8px); left: -10px; z-index: 30;
+  width: max-content; max-width: min(300px, calc(100vw - 48px));
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; font-size: 12.5px; line-height: 1.5; font-weight: 400; text-transform: none; letter-spacing: normal;
+  box-shadow: 0 10px 30px rgb(0 0 0 / .35); white-space: normal; text-align: left;
+  opacity: 0; visibility: hidden; transform: translateY(4px); transition: opacity .12s, transform .12s, visibility .12s;
+  pointer-events: none;
+}
+.infotip--end .infotip__bubble { left: auto; right: -10px; }
+.infotip:hover .infotip__bubble, .infotip:focus-within .infotip__bubble, .infotip--open .infotip__bubble { opacity: 1; visibility: visible; transform: none; }
+.infotip__title { display: block; font-size: 12.5px; color: var(--text); margin-bottom: 4px; }
+/* Phones: show the tip as a sheet pinned to the bottom of the screen. A fixed element can't push the
+   page wider than the viewport, which an absolutely positioned bubble near the right edge would. */
+@media (max-width: 640px) {
+  .infotip__bubble, .infotip--end .infotip__bubble {
+    position: fixed; left: 16px; right: 16px; bottom: 16px; top: auto;
+    width: auto; max-width: none; transform: translateY(8px);
+  }
+  .infotip:hover .infotip__bubble, .infotip:focus-within .infotip__bubble, .infotip--open .infotip__bubble { transform: none; }
+}
+.kicker--with-tip { display: inline-flex; align-items: center; gap: 4px; }
+.finding__sev { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+
+/* ---------- How it works ---------- */
+.modal--wide { width: min(900px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; gap: 18px; }
+.modal__header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.modal__close { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 8px; width: 32px; height: 32px; font-size: 20px; line-height: 1; cursor: pointer; flex-shrink: 0; }
+.modal__close:hover, .modal__close:focus-visible { color: var(--text); border-color: var(--accent); }
+
+.flow { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px; counter-reset: none; }
+.flow__step { position: relative; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; gap: 4px; }
+.flow__step p { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+.flow__icon { width: 44px; height: 44px; border-radius: 10px; display: grid; place-items: center; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); margin-bottom: 6px; }
+.flow__num { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.flow__tech { font-size: 11px; color: var(--accent); }
+/* Connector arrows between steps: right-pointing on desktop, down-pointing when stacked. */
+.flow__step:not(:last-child)::after {
+  content: ""; position: absolute; top: 34px; right: -23px; width: 18px; height: 18px;
+  background: var(--muted);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 12h15M13 6l6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 12h15M13 6l6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+@media (max-width: 900px) {
+  .flow { grid-template-columns: 1fr; gap: 26px; }
+  .flow__step:not(:last-child)::after { top: auto; bottom: -23px; right: auto; left: calc(50% - 9px); transform: rotate(90deg); }
+}
+
+.zero { border-top: 1px solid var(--border); padding-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+.zero h3 { color: var(--text); text-transform: none; letter-spacing: normal; font-size: 15px; margin: 0; }
+.zero p { color: var(--muted); }
+.zero__points { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.zero__points li { font-size: 12.5px; color: var(--muted); display: flex; flex-direction: column; gap: 6px; }
+.zero__state { align-self: flex-start; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; border-radius: 4px; padding: 1px 6px; background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
+.zero__state--idle { color: var(--low); border-color: color-mix(in srgb, var(--low) 40%, transparent); }
+.zero__state--busy { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+@media (max-width: 760px) { .zero__points { grid-template-columns: 1fr; } }

@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import type { Job, ProcessNode } from "@/lib/types";
+import { explainFinding } from "@/lib/findingExplanations";
+import { InfoTip } from "./InfoTip";
 import { ProcessTree } from "./ProcessTree";
 import { formatBytes } from "./UploadPanel";
 
@@ -44,7 +46,15 @@ export function ResultsDashboard({ job }: { job: Job }) {
           </span>
         </div>
         <div className="evidence__hash">
-          <span className="kicker">SHA-256 (verified by worker)</span>
+          <span className="kicker kicker--with-tip">
+            SHA-256 (verified by worker)
+            <InfoTip label="What is this hash?" title="Fingerprint of the evidence" align="end">
+              A SHA-256 hash is a cryptographic fingerprint of the exact bytes of the memory image. Changing even a
+              single bit produces a completely different value. Recording it on upload and re-checking it before
+              analysis proves the evidence wasn&apos;t altered along the way. That&apos;s the integrity, or chain of
+              custody, that makes digital evidence trustworthy.
+            </InfoTip>
+          </span>
           <code>{result.evidenceSha256 ?? job.sha256 ?? "—"}</code>
         </div>
       </div>
@@ -85,13 +95,20 @@ export function ResultsDashboard({ job }: { job: Job }) {
                 <p className="muted">No anomalies matched the triage rules.</p>
               ) : (
                 <ul className="findings">
-                  {findings.map((f, i) => (
+                  {findings.map((f, i) => {
+                    const why = explainFinding(f);
+                    return (
                     <li
                       key={i}
                       className={`finding${f.pid === selected ? " finding--selected" : ""}`}
                       onClick={() => setSelected(f.pid)}
                     >
-                      <span className={`badge badge--${f.severity}`}>{f.severity}</span>
+                      <span className="finding__sev">
+                        <span className={`badge badge--${f.severity}`}>{f.severity}</span>
+                        <InfoTip label={`Why ${f.process} is flagged`} title={why.title}>
+                          {why.body}
+                        </InfoTip>
+                      </span>
                       <div>
                         <strong className="mono">
                           {f.process} <span className="muted">({f.pid})</span>
@@ -100,7 +117,8 @@ export function ResultsDashboard({ job }: { job: Job }) {
                         <code className="finding__rule">{f.rule}</code>
                       </div>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               )}
             </div>
