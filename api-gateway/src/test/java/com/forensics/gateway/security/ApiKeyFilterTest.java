@@ -24,7 +24,7 @@ class ApiKeyFilterTest {
 
     private final WebTestClient client = WebTestClient
             .bindToController(new JobController(mock(JobService.class)))
-            .webFilter(new ApiKeyFilter(provider(KEY)))
+            .webFilter(new ApiKeyFilter(provider(KEY), new RateLimiter(10, java.time.Duration.ofHours(1))))
             .build();
 
     @Test
