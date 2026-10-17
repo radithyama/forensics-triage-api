@@ -1,12 +1,13 @@
 server:
   port: 8080
   shutdown: graceful
-  error:
-    include-message: always
 
 spring:
   application:
     name: api-gateway
+  web:
+    error:
+      include-message: always
   data:
     redis:
       host: ${REDIS_HOST:localhost}
