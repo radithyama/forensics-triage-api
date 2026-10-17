@@ -27,6 +27,9 @@ triage:
   upload-url-ttl: ${UPLOAD_URL_TTL:30m}
   max-upload-size: ${MAX_UPLOAD_SIZE:6GB}
   allowed-origins: ${ALLOWED_ORIGINS:http://localhost:3000}
+  # Access code: read once at startup from Secret Manager (production) or given directly (local dev only).
+  api-key-secret: ${API_KEY_SECRET:}
+  api-key: ${API_KEY:}
   allowed-plugins:
     - windows.pslist.PsList
     - windows.pstree.PsTree

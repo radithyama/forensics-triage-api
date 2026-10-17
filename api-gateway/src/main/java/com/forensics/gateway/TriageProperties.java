@@ -14,7 +14,9 @@ public record TriageProperties(
         Duration uploadUrlTtl,
         DataSize maxUploadSize,
         List<String> allowedOrigins,
-        List<String> allowedPlugins) {
+        List<String> allowedPlugins,
+        String apiKeySecret,
+        String apiKey) {
 
     public static final String DEFAULT_PLUGIN = "windows.pslist.PsList";
 }

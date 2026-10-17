@@ -17,6 +17,7 @@ import com.google.protobuf.ByteString;
 import com.google.pubsub.v1.PubsubMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -40,12 +41,12 @@ public class JobService {
     static final String UPLOAD_CONTENT_TYPE = "application/octet-stream";
 
     private final Storage storage;
-    private final Publisher publisher;
+    private final ObjectProvider<Publisher> publisher;
     private final JobStore jobs;
     private final TriageProperties props;
     private final JsonMapper json;
 
-    public JobService(Storage storage, Publisher publisher, JobStore jobs, TriageProperties props, JsonMapper json) {
+    public JobService(Storage storage, ObjectProvider<Publisher> publisher, JobStore jobs, TriageProperties props, JsonMapper json) {
         this.storage = storage;
         this.publisher = publisher;
         this.jobs = jobs;
@@ -128,7 +129,7 @@ public class JobService {
                 .setData(ByteString.copyFromUtf8(json.writeValueAsString(message)))
                 .putAttributes("jobId", message.jobId())
                 .build();
-        return Mono.fromCallable(() -> publisher.publish(msg).get(30, TimeUnit.SECONDS))
+        return Mono.fromCallable(() -> publisher.getObject().publish(msg).get(30, TimeUnit.SECONDS))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 

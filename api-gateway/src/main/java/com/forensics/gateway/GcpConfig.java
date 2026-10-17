@@ -9,6 +9,7 @@ import com.google.cloud.storage.StorageOptions;
 import com.google.pubsub.v1.TopicName;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Lazy;
 
 /** GCP clients authenticate via Application Default Credentials (the Cloud Run service account); no keys. */
 @Configuration
@@ -19,7 +20,9 @@ public class GcpConfig {
         return StorageOptions.getDefaultInstance().getService();
     }
 
+    /** Lazy: the gRPC channel is opened on first publish, keeping cold starts (and keyless local runs) light. */
     @Bean(destroyMethod = "shutdown")
+    @Lazy
     Publisher publisher(TriageProperties props) throws IOException {
         String project = props.projectId() == null || props.projectId().isBlank()
                 ? ServiceOptions.getDefaultProjectId() : props.projectId();

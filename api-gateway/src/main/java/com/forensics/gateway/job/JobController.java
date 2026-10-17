@@ -33,6 +33,13 @@ public class JobController {
         return jobs.start(id);
     }
 
+    /** Lets the UI check an access code: reaching this handler means the API key filter accepted it. */
+    @GetMapping("/api/session")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public Mono<Void> session() {
+        return Mono.empty();
+    }
+
     @GetMapping("/api/jobs/{id}")
     public Mono<Job> get(@PathVariable String id) {
         return jobs.find(id);

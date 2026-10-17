@@ -22,6 +22,7 @@ import com.google.pubsub.v1.PubsubMessage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.util.unit.DataSize;
 import org.springframework.web.server.ResponseStatusException;
@@ -42,8 +43,9 @@ class JobServiceFlowTest {
     @BeforeEach
     void setUp() {
         TriageProperties props = new TriageProperties("proj", "evidence-bucket", "forensic-jobs",
-                Duration.ofMinutes(30), DataSize.ofGigabytes(6), List.of(), List.of("windows.pslist.PsList"));
-        service = new JobService(storage, publisher, store, props, json);
+                Duration.ofMinutes(30), DataSize.ofGigabytes(6), List.of(), List.of("windows.pslist.PsList"), null, "k".repeat(32));
+        var beans = new StaticListableBeanFactory(java.util.Map.of("publisher", publisher));
+        service = new JobService(storage, beans.getBeanProvider(Publisher.class), store, props, json);
     }
 
     private static Job job(JobStatus status) {
