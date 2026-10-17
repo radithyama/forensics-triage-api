@@ -1,0 +1,27 @@
+# Builds only the public tier (frontend + api-gateway), leaving the forensic-worker image untouched.
+#   gcloud builds submit --config cloudbuild.web.yaml --substitutions=_REGISTRY=...,_TAG=...
+substitutions:
+  _REGISTRY: ""
+  _TAG: latest
+
+options:
+  env: ["DOCKER_BUILDKIT=1"]
+  logging: CLOUD_LOGGING_ONLY
+  dynamicSubstitutions: true
+
+steps:
+  - id: api-gateway
+    name: gcr.io/cloud-builders/docker
+    waitFor: ["-"]
+    args: ["build", "-t", "${_REGISTRY}/api-gateway:${_TAG}", "api-gateway"]
+
+  - id: frontend
+    name: gcr.io/cloud-builders/docker
+    waitFor: ["-"]
+    args: ["build", "-t", "${_REGISTRY}/frontend:${_TAG}", "frontend"]
+
+images:
+  - ${_REGISTRY}/api-gateway:${_TAG}
+  - ${_REGISTRY}/frontend:${_TAG}
+
+timeout: 1200s
