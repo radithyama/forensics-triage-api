@@ -4,28 +4,24 @@ server {
     root /usr/share/nginx/html;
     server_tokens off;
 
+    # The browser talks to the gateway (${API_BASE_URL}) directly and uploads evidence straight to GCS;
+    # nothing else may be contacted.
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "DENY" always;
     add_header Referrer-Policy "no-referrer" always;
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://storage.googleapis.com; frame-ancestors 'none'" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ${API_BASE_URL} https://storage.googleapis.com; frame-ancestors 'none'" always;
 
     location = /healthz {
         access_log off;
         return 200 "ok\n";
     }
 
-    # Only the public API is proxied; the gateway's /internal/** worker endpoints are never exposed.
-    # Evidence goes browser -> GCS via signed URL, so only small JSON calls pass through here.
-    location /api/ {
-        proxy_pass ${API_UPSTREAM_URL};
-        proxy_http_version 1.1;
-        # Cloud Run routes by Host, and needs SNI for its TLS certificate.
-        proxy_set_header Host ${API_UPSTREAM_HOST};
-        proxy_ssl_server_name on;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        client_max_body_size 64k;
-        proxy_read_timeout 60s;
+    # Runtime config, rendered from the container environment so one image serves any deployment.
+    location = /config.js {
+        default_type application/javascript;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        return 200 "window.__TRIAGE_CONFIG__ = { apiBase: \"${API_BASE_URL}\" };\n";
     }
 
     location /_next/static/ {

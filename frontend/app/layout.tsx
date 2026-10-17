@@ -10,6 +10,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        {/* Sets window.__TRIAGE_CONFIG__ (gateway URL) before the app boots; rendered by nginx at runtime. */}
+        <script src="/config.js" />
+      </head>
       <body>{children}</body>
     </html>
   );

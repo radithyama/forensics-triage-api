@@ -58,7 +58,7 @@ export function UploadPanel({ disabled, onSubmit }: Props) {
         ) : (
           <>
             <strong>Drop a memory image here</strong>
-            <span>.raw, .mem, .vmem, .dmp, .lime (uploaded straight to Cloud Storage; hashes verified before analysis)</span>
+            <span>.raw, .mem, .vmem, .dmp, .lime, 10 MB to 6 GB (uploaded straight to Cloud Storage; hashes verified before analysis)</span>
           </>
         )}
       </div>
